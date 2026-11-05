@@ -3,11 +3,13 @@
 # setup.sh — Configuración inicial de FreeBSD + KDE
 #
 # Qué hace:
-#   1. Habilita servicios en /etc/rc.conf (con sysrc)
-#   2. Crea un usuario nuevo (si no existe)
-#   3. Lo agrega a los grupos wheel, video y operator
-#   4. Instala sudo y le da permisos en sudoers
-#   5. Descarga archivos de configuración desde GitHub a su carpeta home
+#   1. Actualiza el sistema de paquetes e instala Xorg, KDE Plasma, SDDM,
+#      Konsole, Dolphin y sudo
+#   2. Habilita servicios en /etc/rc.conf (con sysrc)
+#   3. Crea un usuario nuevo (si no existe)
+#   4. Lo agrega a los grupos wheel, video y operator
+#   5. Le da permisos en sudoers
+#   6. Descarga archivos de configuración desde GitHub a su carpeta home
 #
 # Uso (como root):
 #   sh setup.sh <usuario>
@@ -29,6 +31,15 @@ set -eu
 # ---------------------------------------------------------------------------
 # Configuración — edita estos valores según lo que necesites
 # ---------------------------------------------------------------------------
+
+# Paquetes a instalar
+#   xorg            : servidor gráfico
+#   plasma6-plasma  : escritorio KDE Plasma 6
+#   sddm            : pantalla de inicio de sesión
+#   konsole         : terminal de KDE
+#   dolphin         : explorador de archivos de KDE
+#   sudo            : ejecutar comandos como root desde tu usuario
+PAQUETES="xorg plasma6-plasma sddm konsole dolphin sudo"
 
 # Servicios que se habilitan en /etc/rc.conf como <servicio>_enable="YES"
 SERVICIOS="dbus sddm"
@@ -80,7 +91,27 @@ fi
 USUARIO="$1"
 
 # ---------------------------------------------------------------------------
-# 1. Servicios en /etc/rc.conf
+# 1. Paquetes
+# ---------------------------------------------------------------------------
+# En una instalación nueva, pkg todavía no está instalado: la primera vez
+# pregunta si quieres instalarlo ("bootstrap"). ASSUME_ALWAYS_YES hace que
+# pkg responda "sí" a todo, para que el script no se quede esperando.
+export ASSUME_ALWAYS_YES=yes
+
+info "Actualizando el catálogo de paquetes"
+pkg update
+
+info "Actualizando paquetes instalados"
+pkg upgrade
+
+info "Instalando paquetes: $PAQUETES"
+# $PAQUETES va sin comillas a propósito: así el shell lo separa en
+# varios argumentos (xorg, plasma6-plasma, ...) en lugar de uno solo.
+# shellcheck disable=SC2086
+pkg install $PAQUETES
+
+# ---------------------------------------------------------------------------
+# 2. Servicios en /etc/rc.conf
 # ---------------------------------------------------------------------------
 # sysrc es la herramienta oficial para editar rc.conf: evita líneas
 # duplicadas y errores de sintaxis que pueden pasar al editar a mano.
@@ -91,7 +122,7 @@ for servicio in $SERVICIOS; do
 done
 
 # ---------------------------------------------------------------------------
-# 2. Crear el usuario
+# 3. Crear el usuario
 # ---------------------------------------------------------------------------
 # pw usershow devuelve error si el usuario no existe; lo usamos como prueba.
 # ">/dev/null 2>&1" oculta la salida normal y los errores.
@@ -109,7 +140,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 3. Grupos
+# 4. Grupos
 # ---------------------------------------------------------------------------
 # Usamos "pw groupmod -m" en lugar de "pw usermod -G" porque -G REEMPLAZA
 # todos los grupos del usuario, mientras que groupmod -m solo lo AGREGA.
@@ -125,15 +156,13 @@ for grupo in $GRUPOS; do
 done
 
 # ---------------------------------------------------------------------------
-# 4. sudo
+# 5. sudo
 # ---------------------------------------------------------------------------
-# En FreeBSD, sudo es un paquete y su configuración vive en /usr/local/etc.
-# En vez de editar el archivo sudoers principal, creamos uno propio dentro
-# de sudoers.d. Así es más fácil de mantener y de borrar.
-info "Instalando y configurando sudo"
-
-# -y responde "sí" automáticamente
-pkg install -y sudo
+# En FreeBSD, sudo es un paquete (se instaló en el paso 1) y su
+# configuración vive en /usr/local/etc. En vez de editar el archivo sudoers
+# principal, creamos uno propio dentro de sudoers.d. Así es más fácil de
+# mantener y de borrar.
+info "Configurando sudo"
 
 SUDOERS_ARCHIVO="/usr/local/etc/sudoers.d/$USUARIO"
 SUDOERS_TMP="$(mktemp)"
@@ -153,7 +182,7 @@ fi
 rm -f "$SUDOERS_TMP"
 
 # ---------------------------------------------------------------------------
-# 5. Descargar archivos de configuración al home del usuario
+# 6. Descargar archivos de configuración al home del usuario
 # ---------------------------------------------------------------------------
 # El campo 9 de "pw usershow" es la carpeta home del usuario.
 HOME_USUARIO="$(pw usershow "$USUARIO" | cut -d: -f9)"
