@@ -8,7 +8,7 @@
 #   2. Habilita servicios en /etc/rc.conf (con sysrc)
 #   3. Crea un usuario nuevo (si no existe)
 #   4. Lo agrega a los grupos wheel, video y operator
-#   5. Le da permisos en sudoers
+#   5. Habilita sudo para el grupo wheel (descomenta la línea en sudoers)
 #   6. Descarga archivos de configuración desde GitHub a su carpeta home
 #
 # Uso (como root):
@@ -159,27 +159,49 @@ done
 # 5. sudo
 # ---------------------------------------------------------------------------
 # En FreeBSD, sudo es un paquete (se instaló en el paso 1) y su
-# configuración vive en /usr/local/etc. En vez de editar el archivo sudoers
-# principal, creamos uno propio dentro de sudoers.d. Así es más fácil de
-# mantener y de borrar.
-info "Configurando sudo"
+# configuración vive en /usr/local/etc/sudoers. Ese archivo ya trae la
+# línea "%wheel ALL=(ALL:ALL) ALL" comentada; solo hay que quitarle el "#".
+# Como el usuario ya está en el grupo wheel (paso 4), con eso basta.
+#
+# Es lo mismo que haces a mano con visudo, pero automatizado con sed.
+info "Habilitando sudo para el grupo wheel"
 
-SUDOERS_ARCHIVO="/usr/local/etc/sudoers.d/$USUARIO"
-SUDOERS_TMP="$(mktemp)"
+SUDOERS="/usr/local/etc/sudoers"
+REGLA_WHEEL='%wheel ALL=(ALL:ALL) ALL'
 
-echo "$USUARIO ALL=(ALL:ALL) ALL" > "$SUDOERS_TMP"
-
-# visudo -c valida la sintaxis ANTES de instalar el archivo.
-# Un sudoers con errores puede dejarte sin poder usar sudo.
-if visudo -cf "$SUDOERS_TMP" >/dev/null; then
-    # install copia el archivo y le asigna dueño y permisos en un solo paso
-    install -o root -g wheel -m 0440 "$SUDOERS_TMP" "$SUDOERS_ARCHIVO"
-    echo "Creado $SUDOERS_ARCHIVO"
+# grep -q : no imprime nada, solo indica si encontró la línea
+#      -x : la línea completa debe coincidir (no solo una parte)
+#      -F : busca el texto tal cual, sin interpretar ( ) como regex
+if grep -qxF "$REGLA_WHEEL" "$SUDOERS"; then
+    echo "La regla ya está habilitada, se omite."
 else
+    SUDOERS_TMP="$(mktemp)"
+
+    # sed quita el "#" de la línea comentada y deja el resto igual:
+    #   ^#[[:space:]]*  : "#" al inicio de la línea + espacios opcionales
+    #   \( ... \)       : guarda el resto de la línea como \1
+    #   s/.../\1/       : reemplaza la línea completa por solo \1
+    sed 's/^#[[:space:]]*\(%wheel ALL=(ALL:ALL) ALL\)$/\1/' \
+        "$SUDOERS" > "$SUDOERS_TMP"
+
+    # Si sed no cambió nada, la línea comentada no estaba en el archivo
+    if ! grep -qxF "$REGLA_WHEEL" "$SUDOERS_TMP"; then
+        rm -f "$SUDOERS_TMP"
+        error "No se encontró la línea '# $REGLA_WHEEL' en $SUDOERS"
+    fi
+
+    # visudo -c valida la sintaxis ANTES de reemplazar el archivo real.
+    # Un sudoers con errores puede dejarte sin poder usar sudo.
+    if visudo -cf "$SUDOERS_TMP" >/dev/null; then
+        # install copia el archivo y le asigna dueño y permisos en un solo paso
+        install -o root -g wheel -m 0440 "$SUDOERS_TMP" "$SUDOERS"
+        echo "Habilitada la línea '$REGLA_WHEEL' en $SUDOERS"
+    else
+        rm -f "$SUDOERS_TMP"
+        error "El sudoers modificado no es válido; no se aplicó el cambio"
+    fi
     rm -f "$SUDOERS_TMP"
-    error "La regla de sudoers no es válida"
 fi
-rm -f "$SUDOERS_TMP"
 
 # ---------------------------------------------------------------------------
 # 6. Descargar archivos de configuración al home del usuario
